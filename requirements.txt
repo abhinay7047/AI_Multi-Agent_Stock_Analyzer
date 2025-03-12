@@ -1,0 +1,17 @@
+streamlit>=1.28.0
+crewai>=0.11.0
+openai>=1.12.0
+yfinance>=0.2.33
+pandas>=2.0.0
+plotly>=5.18.0
+python-dotenv>=1.0.0
+numpy>=1.24.0
+requests>=2.31.0
+ta>=0.10.2  # Technical analysis indicators
+scikit-learn>=1.4.0  # For predictions
+duckduckgo-search>=4.4  # For web searches
+langchain>=0.1.0  # Base langchain package
+langchain-openai>=0.0.2  # OpenAI integration
+langchain-community>=0.0.10  # Community integrations
+pydantic>=2.0.0  # Required for Crewai 
+crewai-tools# Required for Crewai 
