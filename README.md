@@ -6,9 +6,6 @@ A comprehensive financial analysis platform powered by AI that combines multiple
 
 - Real-time stock price analysis
 - Technical and fundamental analysis
-- News sentiment analysis
-- Social media trend analysis
-- Price predictions and forecasting
 - Interactive charts and visualizations
 - Risk assessment
 - Comparative peer analysis
@@ -29,10 +26,7 @@ pip install -r requirements.txt
 3. Set up environment variables:
 Create a `.env` file in the root directory with the following variables:
 ```
-GROQ_API_KEY=your_groq_api_key
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
-NEWS_API_KEY=your_news_api_key
-TWITTER_API_KEY=your_twitter_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 ## Running the Application
@@ -49,7 +43,7 @@ streamlit run app.py
 1. Enter a stock symbol in the sidebar
 2. Select the desired timeframe for analysis
 3. Choose the types of analysis you want to perform
-4. Click "Generate Comprehensive Analysis" to get results
+4. Click "Generate AI Analysis" to get results
 
 ## Features Details
 
@@ -65,11 +59,6 @@ streamlit run app.py
 - Market position
 - Peer comparison
 
-### Sentiment Analysis
-- News sentiment
-- Social media trends
-- Market sentiment indicators
-
 ### Risk Assessment
 - Volatility metrics
 - Risk indicators
@@ -78,16 +67,11 @@ streamlit run app.py
 ## Dependencies
 
 - Streamlit
-- Phi Agent
-- Groq
 - YFinance
-- Alpha Vantage
-- News API
-- Twitter API
 - Plotly
 - Pandas
 - NumPy
-- Scikit-learn
+- ta (Technical Analysis Library)
 
 ## Notes
 
