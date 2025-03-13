@@ -1,81 +1,119 @@
-# Advanced Financial Analysis System
+# AI Stock Analysis Platform
 
-A comprehensive financial analysis platform powered by AI that combines multiple data sources and analysis tools to provide in-depth market insights.
+A comprehensive stock analysis platform that combines fundamental analysis, technical indicators, and market sentiment to provide detailed insights into stock performance. The platform uses OpenAI's GPT-4 for intelligent analysis and real-time market data from Yahoo Finance.
 
 ## Features
 
-- Real-time stock price analysis
-- Technical and fundamental analysis
-- Interactive charts and visualizations
-- Risk assessment
-- Comparative peer analysis
+### 1. Market Overview
+- Real-time market indices display (NIFTY 50, SENSEX, BANK NIFTY, NASDAQ, S&P 500)
+- Live price updates with percentage changes
+- Currency-specific formatting (₹ for Indian markets, $ for US markets)
 
-## Setup
+### 2. Quick Metrics
+- Current Price with change percentage
+- Market Capitalization
+- Trading Volume
+- P/E Ratio
+
+### 3. Fundamental Analysis
+- Debt/Equity Ratio
+- Current Ratio
+- Return on Equity (ROE)
+- Return on Assets (ROA)
+- Operating Margin
+- Comprehensive financial statements (Income Statement, Balance Sheet, Cash Flow)
+
+### 4. Technical Analysis
+- MACD (Moving Average Convergence Divergence)
+- Stochastic Oscillator
+- Average True Range (ATR)
+- Moving Averages (20-day and 50-day)
+- Fibonacci Levels
+- Candlestick Charts
+- Volume Analysis
+
+### 5. Risk Analysis
+- Volatility Metrics
+- Risk-adjusted Returns
+- Market Risk Indicators
+
+### 6. AI-Powered Analysis
+- Comprehensive stock analysis using GPT-4
+- Sector-specific insights
+- Market sentiment analysis
+- Growth and dividend analysis
+
+## Installation
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd <repository-name>
+cd stock-analysis-platform
 ```
 
-2. Install dependencies:
+2. Install required packages:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables:
-Create a `.env` file in the root directory with the following variables:
+3. Create a `.env` file in the root directory and add your OpenAI API key:
 ```
-OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_KEY=your_api_key_here
 ```
 
-## Running the Application
+## Usage
 
-1. Start the Streamlit app:
+1. Start the application:
 ```bash
 streamlit run app.py
 ```
 
-2. Open your browser and navigate to `http://localhost:8501`
+2. Enter a stock symbol in the sidebar (e.g., "AAPL" for Apple Inc.)
 
-## Usage
+3. Select the desired analysis types:
+   - Fundamental Analysis
+   - Technical Analysis
+   - News Analysis
+   - Risk Analysis
+   - Portfolio Analysis
 
-1. Enter a stock symbol in the sidebar
-2. Select the desired timeframe for analysis
-3. Choose the types of analysis you want to perform
-4. Click "Generate AI Analysis" to get results
+4. Choose the time period for analysis:
+   - 1 month
+   - 3 months
+   - 6 months
+   - 1 year
+   - 2 years
+   - 5 years
 
-## Features Details
+## Project Structure
 
-### Technical Analysis
-- Price trends and patterns
-- Moving averages
-- Volume analysis
-- Technical indicators
-
-### Fundamental Analysis
-- Financial ratios
-- Company fundamentals
-- Market position
-- Peer comparison
-
-### Risk Assessment
-- Volatility metrics
-- Risk indicators
-- Market correlation
+- `app.py`: Main Streamlit application
+- `stock_analyzer.py`: Core analysis functionality
+- `.env`: Environment variables (API keys)
+- `requirements.txt`: Project dependencies
 
 ## Dependencies
 
-- Streamlit
-- YFinance
-- Plotly
-- Pandas
-- NumPy
-- ta (Technical Analysis Library)
+- streamlit
+- yfinance
+- pandas
+- plotly
+- ta (Technical Analysis library)
+- python-dotenv
+- requests
+- beautifulsoup4
+- openai
 
-## Notes
+## Contributing
 
-- Ensure all API keys are valid and have sufficient credits
-- Some analyses may take a few minutes to generate
-- Keep your dependencies up to date
-- Monitor API rate limits 
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+
+
+## Disclaimer
+
+This tool is for educational and research purposes only. Always do your own research and consider consulting with financial advisors before making investment decisions.
+
+## Version
+
+Current Version: 1.0.0 

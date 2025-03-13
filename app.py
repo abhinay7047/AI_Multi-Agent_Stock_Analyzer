@@ -7,10 +7,13 @@ import pandas as pd
 from dotenv import load_dotenv
 import os
 import requests
-from stock_analyzer import StockAnalyzer
+from stock_analyzer import StockAnalyzer,calculate_risk_metrics
 import json
 from bs4 import BeautifulSoup
 from typing import Optional, Dict
+from ta.trend import MACD
+from ta.momentum import StochasticOscillator
+from ta.volatility import AverageTrueRange
 
 # Load environment variables
 load_dotenv()
@@ -118,8 +121,8 @@ time_period = st.sidebar.selectbox(
 # Analysis type selection
 analysis_types = st.sidebar.multiselect(
     "Select Analysis Types",
-    ["Fundamental Analysis", "Technical Analysis", "News Analysis"],
-    default=["Fundamental Analysis", "Technical Analysis", "News Analysis"]
+    ["Fundamental Analysis", "Technical Analysis", "News Analysis","Risk Analysis","Portfolio Analysis"],
+    default=["Fundamental Analysis", "Technical Analysis", "News Analysis","Risk Analysis","Portfolio Analysis"]
 )
 
 # Market Indices Section
@@ -219,6 +222,133 @@ if symbol:
                     value=f"{info.get('forwardPE', 'N/A'):.2f}"
                 )
 
+            # Add Fundamental Metrics section
+            st.subheader("Fundamental Metrics")
+            fund_col1, fund_col2, fund_col3, fund_col4, fund_col5 = st.columns(5)
+            
+            # Get financial data once to avoid multiple API calls
+            try:
+                balance_sheet = stock.balance_sheet
+                income_stmt = stock.income_stmt
+                
+                with fund_col1:
+                    try:
+                        # Calculate Debt/Equity ratio
+                        if not balance_sheet.empty:
+                            # Use exact column names from the balance sheet
+                            debt = balance_sheet.loc['Total Debt'].iloc[0] if 'Total Debt' in balance_sheet.index else None
+                            equity = balance_sheet.loc['Total Equity Gross Minority Interest'].iloc[0] if 'Total Equity Gross Minority Interest' in balance_sheet.index else None
+                            
+                            if debt is not None and equity is not None and equity != 0:
+                                debt_equity = debt / equity
+                                st.metric(
+                                    label="Debt/Equity",
+                                    value=f"{debt_equity:.2f}",
+                                    help="Lower is better. Indicates financial leverage and risk."
+                                )
+                            else:
+                                st.metric(label="Debt/Equity", value="N/A")
+                        else:
+                            st.metric(label="Debt/Equity", value="N/A")
+                    except Exception as e:
+                        st.metric(label="Debt/Equity", value="N/A")
+                
+                with fund_col2:
+                    try:
+                        # Calculate Current Ratio
+                        if not balance_sheet.empty:
+                            # Use exact column names from the balance sheet
+                            current_assets = balance_sheet.loc['Cash Cash Equivalents And Short Term Investments'].iloc[0] if 'Cash Cash Equivalents And Short Term Investments' in balance_sheet.index else None
+                            current_liabilities = balance_sheet.loc['Total Liabilities Net Minority Interest'].iloc[0] if 'Total Liabilities Net Minority Interest' in balance_sheet.index else None
+                            
+                            if current_assets is not None and current_liabilities is not None and current_liabilities != 0:
+                                current_ratio = current_assets / current_liabilities
+                                st.metric(
+                                    label="Current Ratio",
+                                    value=f"{current_ratio:.2f}",
+                                    help="Higher is better. Measures short-term liquidity."
+                                )
+                            else:
+                                st.metric(label="Current Ratio", value="N/A")
+                        else:
+                            st.metric(label="Current Ratio", value="N/A")
+                    except Exception as e:
+                        st.metric(label="Current Ratio", value="N/A")
+                
+                with fund_col3:
+                    try:
+                        # Calculate ROE
+                        if not income_stmt.empty and not balance_sheet.empty:
+                            # Use exact column names from the financial statements
+                            net_income = income_stmt.loc['Net Income Common Stockholders'].iloc[0] if 'Net Income Common Stockholders' in income_stmt.index else None
+                            equity = balance_sheet.loc['Total Equity Gross Minority Interest'].iloc[0] if 'Total Equity Gross Minority Interest' in balance_sheet.index else None
+                            
+                            if net_income is not None and equity is not None and equity != 0:
+                                roe = (net_income / equity) * 100
+                                st.metric(
+                                    label="ROE",
+                                    value=f"{roe:.2f}%",
+                                    help="Higher is better. Measures return on shareholder equity."
+                                )
+                            else:
+                                st.metric(label="ROE", value="N/A")
+                        else:
+                            st.metric(label="ROE", value="N/A")
+                    except Exception as e:
+                        st.metric(label="ROE", value="N/A")
+                
+                with fund_col4:
+                    try:
+                        # Calculate ROA
+                        if not income_stmt.empty and not balance_sheet.empty:
+                            # Use exact column names from the financial statements
+                            net_income = income_stmt.loc['Net Income Common Stockholders'].iloc[0] if 'Net Income Common Stockholders' in income_stmt.index else None
+                            total_assets = balance_sheet.loc['Total Assets'].iloc[0] if 'Total Assets' in balance_sheet.index else None
+                            
+                            if net_income is not None and total_assets is not None and total_assets != 0:
+                                roa = (net_income / total_assets) * 100
+                                st.metric(
+                                    label="ROA",
+                                    value=f"{roa:.2f}%",
+                                    help="Higher is better. Measures efficiency in using assets."
+                                )
+                            else:
+                                st.metric(label="ROA", value="N/A")
+                        else:
+                            st.metric(label="ROA", value="N/A")
+                    except Exception as e:
+                        st.metric(label="ROA", value="N/A")
+                
+                with fund_col5:
+                    try:
+                        # Calculate Operating Margin
+                        if not income_stmt.empty:
+                            # Use exact column names from the income statement
+                            operating_income = income_stmt.loc['EBIT'].iloc[0] if 'EBIT' in income_stmt.index else None
+                            total_revenue = income_stmt.loc['Total Revenue'].iloc[0] if 'Total Revenue' in income_stmt.index else None
+                            
+                            if operating_income is not None and total_revenue is not None and total_revenue != 0:
+                                operating_margin = (operating_income / total_revenue) * 100
+                                st.metric(
+                                    label="Operating Margin",
+                                    value=f"{operating_margin:.2f}%",
+                                    help="Higher is better. Shows operational efficiency."
+                                )
+                            else:
+                                st.metric(label="Operating Margin", value="N/A")
+                        else:
+                            st.metric(label="Operating Margin", value="N/A")
+                    except Exception as e:
+                        st.metric(label="Operating Margin", value="N/A")
+
+            except Exception as e:
+                st.error(f"Error fetching financial data: {str(e)}")
+                st.metric(label="Debt/Equity", value="N/A")
+                st.metric(label="Current Ratio", value="N/A")
+                st.metric(label="ROE", value="N/A")
+                st.metric(label="ROA", value="N/A")
+                st.metric(label="Operating Margin", value="N/A")
+
             # Create tabs for different analyses
             tab1, tab2, tab3 = st.tabs(["AI Analysis", "Charts", "Financial Statements"])
             
@@ -250,13 +380,80 @@ if symbol:
                     st.write(f"**Industry:** {industry}")
                     st.write(f"**Country:** {country}")
                 
-                # Candlestick chart
+                # Add Advanced Technical Analysis
+                st.subheader("Advanced Technical Analysis")
+                tech_col1, tech_col2 = st.columns(2)
+                
+                with tech_col1:
+                    # MACD Chart
+                    macd = MACD(close=hist_data['Close'])
+                    macd_line = macd.macd()
+                    signal_line = macd.macd_signal()
+                    macd_hist = macd.macd_diff()
+                    
+                    fig_macd = go.Figure()
+                    fig_macd.add_trace(go.Scatter(x=hist_data.index, y=macd_line, name='MACD Line'))
+                    fig_macd.add_trace(go.Scatter(x=hist_data.index, y=signal_line, name='Signal Line'))
+                    fig_macd.add_trace(go.Bar(x=hist_data.index, y=macd_hist, name='MACD Histogram'))
+                    fig_macd.update_layout(title='MACD', template="plotly_dark")
+                    st.plotly_chart(fig_macd, use_container_width=True)
+                    
+                    # Stochastic Oscillator
+                    stoch = StochasticOscillator(high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'])
+                    stoch_k = stoch.stoch()
+                    stoch_d = stoch.stoch_signal()
+                    
+                    fig_stoch = go.Figure()
+                    fig_stoch.add_trace(go.Scatter(x=hist_data.index, y=stoch_k, name='K Line'))
+                    fig_stoch.add_trace(go.Scatter(x=hist_data.index, y=stoch_d, name='D Line'))
+                    fig_stoch.add_hline(y=80, line_dash="dash", line_color="red")
+                    fig_stoch.add_hline(y=20, line_dash="dash", line_color="green")
+                    fig_stoch.update_layout(title='Stochastic Oscillator', template="plotly_dark")
+                    st.plotly_chart(fig_stoch, use_container_width=True)
+                
+                with tech_col2:
+                    # Risk Metrics
+                    st.markdown("### Risk Metrics")
+                    risk_metrics = calculate_risk_metrics(symbol, time_period)
+                    risk_data = eval(risk_metrics)
+                    
+                    for metric, value in risk_data.items():
+                        st.metric(metric, value)
+                    
+                    # ATR Chart
+                    atr = AverageTrueRange(high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'])
+                    atr_value = atr.average_true_range()
+                    
+                    fig_atr = go.Figure()
+                    fig_atr.add_trace(go.Scatter(x=hist_data.index, y=atr_value, name='ATR'))
+                    fig_atr.update_layout(title='Average True Range', template="plotly_dark")
+                    st.plotly_chart(fig_atr, use_container_width=True)
+                
+                # Candlestick chart with Fibonacci levels
+                st.subheader("Price Chart with Fibonacci Levels")
+                high = hist_data['High'].max()
+                low = hist_data['Low'].min()
+                diff = high - low
+                fib_levels = {
+                    '0%': low,
+                    '23.6%': low + 0.236 * diff,
+                    '38.2%': low + 0.382 * diff,
+                    '50%': low + 0.5 * diff,
+                    '61.8%': low + 0.618 * diff,
+                    '100%': high
+                }
+                
                 fig = go.Figure(data=[go.Candlestick(x=hist_data.index,
                             open=hist_data['Open'],
                             high=hist_data['High'],
                             low=hist_data['Low'],
                             close=hist_data['Close'],
                             name="OHLC")])
+                
+                # Add Fibonacci levels
+                for level, price in fib_levels.items():
+                    fig.add_hline(y=price, line_dash="dash", line_color="gray",
+                                annotation_text=level, annotation_position="right")
                 
                 # Add moving averages
                 fig.add_trace(go.Scatter(x=hist_data.index, 
@@ -269,7 +466,7 @@ if symbol:
                                        name="50-day MA"))
                 
                 fig.update_layout(
-                    title=f"{symbol} Stock Price",
+                    title=f"{symbol} Stock Price with Fibonacci Levels",
                     yaxis_title="Price",
                     xaxis_title="Date",
                     template="plotly_dark",
