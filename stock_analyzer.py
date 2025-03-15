@@ -14,6 +14,7 @@ from ta.volatility import BollingerBands, AverageTrueRange
 from duckduckgo_search import DDGS
 from typing import Any
 from scipy import stats
+import streamlit as st
 
 # Load environment variables
 load_dotenv()
@@ -233,6 +234,11 @@ def analyze_advanced_technical_indicators(symbol: str, period: str = '1y') -> st
 def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
     """Calculates various risk metrics including VaR, Sharpe ratio, and Beta"""
     try:
+        # Check if we already have calculated risk metrics in session state
+        if hasattr(st.session_state, 'risk_metrics') and st.session_state.risk_metrics is not None:
+            print(f"Using cached risk metrics from session state")
+            return str(st.session_state.risk_metrics)
+            
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period)
         
@@ -244,11 +250,18 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
         
         # Calculate Value at Risk (VaR)
         var_95 = np.percentile(returns, 5)
+        var_99 = np.percentile(returns, 1)
         
         # Calculate Sharpe Ratio (assuming risk-free rate of 2%)
         risk_free_rate = 0.02
         excess_returns = returns - risk_free_rate/252
         sharpe_ratio = np.sqrt(252) * excess_returns.mean() / excess_returns.std() if excess_returns.std() != 0 else 0
+        
+        # Calculate Sortino Ratio (downside risk only)
+        negative_returns = returns[returns < 0]
+        sortino_ratio = 0
+        if len(negative_returns) > 0 and negative_returns.std() != 0:
+            sortino_ratio = np.sqrt(252) * excess_returns.mean() / negative_returns.std()
         
         # Calculate Beta (using appropriate market index based on exchange)
         try:
@@ -287,180 +300,405 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
         except Exception as e:
             print(f"Error calculating max drawdown: {str(e)}")
             max_drawdown = 0
+            
+        # Stress Testing Scenarios
+        try:
+            # Market Crash Scenario (simulate 2008-like crash)
+            market_crash_impact = returns.mean() - 2 * returns.std() * 5  # 5-sigma event
+            
+            # Interest Rate Hike Scenario
+            if beta > 0:
+                interest_rate_impact = -0.05 * beta  # 5% market drop due to rate hike
+            else:
+                interest_rate_impact = -0.02  # Default impact
+                
+            # Sector-Specific Shock
+            sector_shock = returns.mean() - 1.5 * returns.std()
+            
+            # Calculate Conditional VaR (Expected Shortfall)
+            cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95 * 1.5
+        except Exception as e:
+            print(f"Error in stress testing: {str(e)}")
+            market_crash_impact = -0.15  # Default value
+            interest_rate_impact = -0.05  # Default value
+            sector_shock = -0.10  # Default value
+            cvar_95 = var_95 * 1.5  # Default value
+        
+        # Risk-Adjusted Returns
+        try:
+            # Treynor Ratio
+            treynor_ratio = 0
+            if beta != 0:
+                treynor_ratio = (returns.mean() * 252 - risk_free_rate) / beta
+                
+            # Information Ratio (assuming market as benchmark)
+            if 'market' in locals() and len(aligned_returns) > 1:
+                tracking_error = (aligned_returns['stock'] - aligned_returns['market']).std() * np.sqrt(252)
+                information_ratio = 0
+                if tracking_error != 0:
+                    information_ratio = (aligned_returns['stock'].mean() - aligned_returns['market'].mean()) * 252 / tracking_error
+            else:
+                information_ratio = 0
+                
+            # Calmar Ratio
+            calmar_ratio = 0
+            if max_drawdown != 0:
+                calmar_ratio = (returns.mean() * 252) / abs(max_drawdown)
+        except Exception as e:
+            print(f"Error calculating risk-adjusted returns: {str(e)}")
+            treynor_ratio = 0
+            information_ratio = 0
+            calmar_ratio = 0
         
         analysis = {
             "Value at Risk (95%)": f"{var_95:.2%}",
+            "Value at Risk (99%)": f"{var_99:.2%}",
+            "Conditional VaR (95%)": f"{cvar_95:.2%}",
             "Sharpe Ratio": f"{sharpe_ratio:.2f}",
+            "Sortino Ratio": f"{sortino_ratio:.2f}",
             "Beta": f"{beta:.2f}",
-            "Maximum Drawdown": f"{max_drawdown:.2%}"
+            "Maximum Drawdown": f"{max_drawdown:.2%}",
+            "Market Crash Impact": f"{market_crash_impact:.2%}",
+            "Interest Rate Hike Impact": f"{interest_rate_impact:.2%}",
+            "Sector Shock Impact": f"{sector_shock:.2%}",
+            "Treynor Ratio": f"{treynor_ratio:.4f}",
+            "Information Ratio": f"{information_ratio:.2f}",
+            "Calmar Ratio": f"{calmar_ratio:.2f}"
         }
+        
+        # Store in session state for future use
+        if hasattr(st, 'session_state'):
+            st.session_state.risk_metrics = analysis
+            print(f"Stored risk metrics in session state: {analysis}")
         
         return str(analysis)
     except Exception as e:
+        print(f"Error calculating risk metrics: {str(e)}")
         return f"Error calculating risk metrics: {str(e)}"
 
 def calculate_financial_ratios(symbol: str) -> str:
-    """Calculates key financial ratios including D/E, current ratio, ROE, ROA, and operating margin"""
+    """Calculates key financial ratios for a given stock symbol"""
     try:
+        # Check if we already have calculated ratios in session state
+        if hasattr(st.session_state, 'financial_ratios') and st.session_state.financial_ratios is not None:
+            print(f"Using cached financial ratios from session state: {st.session_state.financial_ratios}")
+            return str(st.session_state.financial_ratios)
+        
+        print(f"Calculating financial ratios for {symbol}...")
         stock = yf.Ticker(symbol)
-        balance_sheet = stock.balance_sheet
-        income_stmt = stock.income_stmt
         
-        if balance_sheet.empty or income_stmt.empty:
-            return "Unable to calculate financial ratios: Missing financial data"
-        
-        # Get the most recent values
-        latest_bs = balance_sheet.iloc[:, 0]
-        latest_is = income_stmt.iloc[:, 0]
-        
-        # Calculate ratios
+        # Initialize ratios dictionary
         ratios = {}
         
-        # Debt-to-Equity Ratio
+        # Try to get ratios from info first (most reliable source)
         try:
-            total_debt = latest_bs.get('Total Debt', 0)
-            total_equity = latest_bs.get('Total Stockholder Equity', 0)
-            if total_equity != 0:
-                ratios['Debt-to-Equity'] = f"{total_debt/total_equity:.2f}"
-            else:
-                ratios['Debt-to-Equity'] = 'N/A'
-        except:
-            ratios['Debt-to-Equity'] = 'N/A'
+            info = stock.info
+            if info:
+                # Get company name for better identification
+                company_name = info.get('longName', '')
+                print(f"Analyzing {company_name} ({symbol})")
+                
+                # Try to get metrics directly from info
+                if 'returnOnEquity' in info and info['returnOnEquity'] is not None:
+                    ratios['ROE'] = f"{info['returnOnEquity']*100:.2f}%"
+                
+                if 'returnOnAssets' in info and info['returnOnAssets'] is not None:
+                    ratios['ROA'] = f"{info['returnOnAssets']*100:.2f}%"
+                
+                if 'operatingMargins' in info and info['operatingMargins'] is not None:
+                    ratios['Operating Margin'] = f"{info['operatingMargins']*100:.2f}%"
+                
+                if 'currentRatio' in info and info['currentRatio'] is not None:
+                    ratios['Current Ratio'] = f"{info['currentRatio']:.2f}"
+                
+                # Calculate Debt-to-Equity if we have the components
+                if 'totalDebt' in info and 'totalShareholderEquity' in info:
+                    if info['totalShareholderEquity'] > 0:
+                        de_ratio = info['totalDebt'] / info['totalShareholderEquity']
+                        ratios['Debt-to-Equity'] = f"{de_ratio:.2f}"
+                
+                # Add additional ratios if available
+                if 'priceToBook' in info and info['priceToBook'] is not None:
+                    ratios['Price/Book'] = f"{info['priceToBook']:.2f}"
+                
+                if 'forwardPE' in info and info['forwardPE'] is not None:
+                    ratios['P/E Ratio'] = f"{info['forwardPE']:.2f}"
+                elif 'trailingPE' in info and info['trailingPE'] is not None:
+                    ratios['P/E Ratio'] = f"{info['trailingPE']:.2f}"
+                
+                if 'enterpriseToEbitda' in info and info['enterpriseToEbitda'] is not None:
+                    ratios['EV/EBITDA'] = f"{info['enterpriseToEbitda']:.2f}"
+                
+                if 'profitMargins' in info and info['profitMargins'] is not None:
+                    ratios['Net Profit Margin'] = f"{info['profitMargins']*100:.2f}%"
+                
+                # Add ROCE if available
+                
+                print(f"Got ratios from info: {ratios}")
+        except Exception as e:
+            print(f"Error getting ratios from info: {str(e)}")
         
-        # Current Ratio
-        try:
-            current_assets = latest_bs.get('Total Current Assets', 0)
-            current_liabilities = latest_bs.get('Total Current Liabilities', 0)
-            if current_liabilities != 0:
-                ratios['Current Ratio'] = f"{current_assets/current_liabilities:.2f}"
-            else:
-                ratios['Current Ratio'] = 'N/A'
-        except:
-            ratios['Current Ratio'] = 'N/A'
-        
-        # Return on Equity (ROE)
-        try:
-            net_income = latest_is.get('Net Income', 0)
-            total_equity = latest_bs.get('Total Stockholder Equity', 0)
-            if total_equity != 0:
-                ratios['ROE'] = f"{(net_income/total_equity)*100:.2f}%"
-            else:
-                ratios['ROE'] = 'N/A'
-        except:
-            ratios['ROE'] = 'N/A'
-        
-        # Return on Assets (ROA)
-        try:
-            total_assets = latest_bs.get('Total Assets', 0)
-            if total_assets != 0:
-                ratios['ROA'] = f"{(net_income/total_assets)*100:.2f}%"
-            else:
-                ratios['ROA'] = 'N/A'
-        except:
-            ratios['ROA'] = 'N/A'
-        
-        # Operating Margin
-        try:
-            operating_income = latest_is.get('Operating Income', 0)
-            total_revenue = latest_is.get('Total Revenue', 0)
-            if total_revenue != 0:
-                ratios['Operating Margin'] = f"{(operating_income/total_revenue)*100:.2f}%"
-            else:
-                ratios['Operating Margin'] = 'N/A'
-        except:
-            ratios['Operating Margin'] = 'N/A'
-        
-        # Add industry-specific ratios based on sector
-        sector = stock.info.get('sector', '').lower()
-        
-        # Technology sector ratios
-        if 'technology' in sector:
+        # If we don't have all the ratios from info, try financial statements
+        if len(ratios) < 5:  # If we're missing some key ratios
             try:
-                # R&D to Revenue
-                r_and_d = latest_is.get('Research And Development', 0)
-                if total_revenue != 0:
-                    ratios['R&D to Revenue'] = f"{(r_and_d/total_revenue)*100:.2f}%"
-            except:
-                pass
+                # Try to get annual data first (more reliable for ratios)
+                balance_sheet = stock.balance_sheet
+                income_stmt = stock.income_stmt
+                
+                if balance_sheet.empty or income_stmt.empty:
+                    # If annual data is empty, try quarterly data
+                    print("Annual financial statements empty, trying quarterly data...")
+                    balance_sheet = stock.quarterly_balance_sheet
+                    income_stmt = stock.quarterly_income_stmt
+                
+                if not balance_sheet.empty and not income_stmt.empty:
+                    # Get the latest financial data
+                    latest_bs = balance_sheet.iloc[:, 0].to_dict()
+                    latest_is = income_stmt.iloc[:, 0].to_dict()
+                    
+                    print(f"Latest balance sheet date: {balance_sheet.columns[0]}")
+                    print(f"Latest income statement date: {income_stmt.columns[0]}")
+                    
+                    # Print available keys for debugging
+                    print(f"Balance sheet keys: {list(latest_bs.keys())}")
+                    print(f"Income statement keys: {list(latest_is.keys())}")
+                    
+                    # Total Debt calculation with multiple attempts
+                    total_debt = latest_bs.get('Total Debt', 
+                                latest_bs.get('Long Term Debt', 
+                                latest_bs.get('LongTermDebt', 
+                                latest_bs.get('Total Liabilities Net Minority Interest', 
+                                latest_bs.get('TotalDebt', 0)))))
+                    
+                    # Total Equity calculation with multiple attempts
+                    total_equity = latest_bs.get('Total Equity Gross Minority Interest', 
+                                  latest_bs.get('Stockholders Equity', 
+                                  latest_bs.get('StockholdersEquity', 
+                                  latest_bs.get('Total Equity', 
+                                  latest_bs.get('TotalEquityGrossMinorityInterest', 
+                                  latest_bs.get('TotalStockholdersEquity', 0))))))
+                    
+                    # Current Assets calculation with multiple attempts
+                    current_assets = latest_bs.get('Current Assets', 
+                                   latest_bs.get('Total Current Assets', 
+                                   latest_bs.get('CurrentAssets', 
+                                   latest_bs.get('TotalCurrentAssets', 
+                                   latest_bs.get('Cash And Cash Equivalents', 
+                                   latest_bs.get('CashAndCashEquivalents', 0))))))
+                    
+                    # Current Liabilities calculation with multiple attempts
+                    current_liabilities = latest_bs.get('Current Liabilities', 
+                                        latest_bs.get('Total Current Liabilities', 
+                                        latest_bs.get('CurrentLiabilities', 
+                                        latest_bs.get('TotalCurrentLiabilities', 
+                                        latest_bs.get('Accounts Payable', 
+                                        latest_bs.get('AccountsPayable', 0))))))
+                    
+                    # Net Income calculation with multiple attempts
+                    net_income = latest_is.get('Net Income', 
+                                latest_is.get('Net Income Common Stockholders', 
+                                latest_is.get('NetIncome', 
+                                latest_is.get('NetIncomeCommonStockholders', 
+                                latest_is.get('Net Income from Continuing Operations', 
+                                latest_is.get('NetIncomeFromContinuingOperations', 0))))))
+                    
+                    # Total Assets calculation with multiple attempts
+                    total_assets = latest_bs.get('Total Assets', 
+                                  latest_bs.get('TotalAssets', 0))
+                    
+                    # Operating Income calculation with multiple attempts
+                    operating_income = latest_is.get('Operating Income', 
+                                     latest_is.get('EBIT', 
+                                     latest_is.get('OperatingIncome', 
+                                     latest_is.get('Operating Income or Loss', 
+                                     latest_is.get('OperatingIncomeOrLoss', 0)))))
+                    
+                    # Total Revenue calculation with multiple attempts
+                    total_revenue = latest_is.get('Total Revenue',
+                                   latest_is.get('Revenue',
+                                   latest_is.get('TotalRevenue',
+                                   latest_is.get('Gross Profit',
+                                   latest_is.get('GrossProfit', 0)))))
+                    
+                    
+                    # Calculate and format ratios if not already in the dictionary
+                    
+                    # Debt-to-Equity Ratio
+                    if 'Debt-to-Equity' not in ratios and total_equity != 0:
+                        ratios['Debt-to-Equity'] = f"{(total_debt / total_equity):.2f}"
+                    
+                    # Current Ratio
+                    if 'Current Ratio' not in ratios and current_liabilities != 0:
+                        ratios['Current Ratio'] = f"{(current_assets / current_liabilities):.2f}"
+                    
+                    # ROE
+                    if 'ROE' not in ratios and total_equity != 0:
+                        ratios['ROE'] = f"{(net_income / total_equity * 100):.2f}%"
+                    
+                    # ROA
+                    if 'ROA' not in ratios and total_assets != 0:
+                        ratios['ROA'] = f"{(net_income / total_assets * 100):.2f}%"
+                    
+                    # Operating Margin
+                    if 'Operating Margin' not in ratios and total_revenue != 0:
+                        ratios['Operating Margin'] = f"{(operating_income / total_revenue * 100):.2f}%"
+                    
+                    # Asset Turnover
+                    if 'Asset Turnover' not in ratios and total_assets != 0:
+                        ratios['Asset Turnover'] = f"{(total_revenue / total_assets):.2f}"
+                    
+                    # Net Profit Margin
+                    if 'Net Profit Margin' not in ratios and total_revenue != 0:
+                        ratios['Net Profit Margin'] = f"{(net_income / total_revenue * 100):.2f}%"
+                    
+                    print(f"Added ratios from financial statements: {ratios}")
+            except Exception as e:
+                print(f"Error calculating ratios from financial statements: {str(e)}")
+        
+        # Try to get more accurate data from alternative sources if still missing key ratios
+        if 'Debt-to-Equity' not in ratios or 'ROE' not in ratios or 'ROA' not in ratios or 'Operating Margin' not in ratios or 'ROCE' not in ratios or 'Dividend Yield' not in ratios or 'Net Profit Margin' not in ratios or 'P/E Ratio' not in ratios or 'Price/Book' not in ratios:
+            try:
+                # Try to get more accurate data from stock.info
+                info = stock.info
+                
+                # Fallback to info for missing metrics
+                if 'Debt-to-Equity' not in ratios and 'debtToEquity' in info and info['debtToEquity'] is not None:
+                    ratios['Debt-to-Equity'] = f"{info['debtToEquity']/100:.2f}"
+                
+                if 'ROE' not in ratios and 'returnOnEquity' in info and info['returnOnEquity'] is not None:
+                    ratios['ROE'] = f"{info['returnOnEquity']*100:.2f}%"
+                
+                if 'ROA' not in ratios and 'returnOnAssets' in info and info['returnOnAssets'] is not None:
+                    ratios['ROA'] = f"{info['returnOnAssets']*100:.2f}%"
+                
+                if 'Operating Margin' not in ratios and 'operatingMargins' in info and info['operatingMargins'] is not None:
+                    ratios['Operating Margin'] = f"{info['operatingMargins']*100:.2f}%"
+                
+                if 'Current Ratio' not in ratios and 'currentRatio' in info and info['currentRatio'] is not None:
+                    ratios['Current Ratio'] = f"{info['currentRatio']:.2f}"
+                
+                # Try to calculate ROCE if missing
+                if 'ROCE' not in ratios:
+                    if 'returnOnCapital' in info and info['returnOnCapital'] is not None:
+                        ratios['ROCE'] = f"{info['returnOnCapital']*100:.2f}%"
+                    elif 'ebit' in info and 'totalAssets' in info and 'totalCurrentLiabilities' in info:
+                        capital_employed = info['totalAssets'] - info['totalCurrentLiabilities']
+                        if capital_employed > 0:
+                            roce = (info['ebit'] / capital_employed) * 100
+                            ratios['ROCE'] = f"{roce:.2f}%"
+                
+                # Try to get Dividend Yield if missing
+                if 'Dividend Yield' not in ratios and 'dividendYield' in info and info['dividendYield'] is not None:
+                    # Ensure dividend yield is reasonable (less than 15%)
+                    if 0 <= info['dividendYield'] <= 0.15:
+                        ratios['Dividend Yield'] = f"{info['dividendYield']*100:.2f}%"
+                    else:
+                        print(f"Unreasonable dividend yield: {info['dividendYield']*100:.2f}%, ignoring")
+                
+                # Try to calculate missing ratios from other available data
+                if 'Debt-to-Equity' not in ratios and 'totalDebt' in info and 'totalShareholderEquity' in info:
+                    if info['totalShareholderEquity'] > 0:
+                        de_ratio = info['totalDebt'] / info['totalShareholderEquity']
+                        ratios['Debt-to-Equity'] = f"{de_ratio:.2f}"
+                
+                # For Indian stocks, try to use more accurate data
+                if '.NS' in symbol or '.BO' in symbol:
+                    # For Indian stocks, sometimes the debt-to-equity is reported differently
+                    if 'Debt-to-Equity' not in ratios and 'longTermDebt' in info and 'totalShareholderEquity' in info:
+                        if info['totalShareholderEquity'] > 0:
+                            de_ratio = info['longTermDebt'] / info['totalShareholderEquity']
+                            ratios['Debt-to-Equity'] = f"{de_ratio:.2f}"
+            except Exception as e:
+                print(f"Error getting additional ratios from info: {str(e)}")
+        
+        # Ensure we have at least some values for the key ratios
+        for key in ['Debt-to-Equity', 'Current Ratio', 'ROE', 'ROA', 'Operating Margin', 'ROCE', 'Dividend Yield', 'Net Profit Margin', 'P/E Ratio', 'Price/Book']:
+            if key not in ratios:
+                ratios[key] = 'N/A'
+        
+        # Validate the ratios to ensure they're reasonable
+        try:
+            # Debt-to-Equity validation
+            if 'Debt-to-Equity' in ratios and ratios['Debt-to-Equity'] != 'N/A':
+                de_value = float(ratios['Debt-to-Equity'].replace('%', ''))
+                if de_value < 0 or de_value > 10:  # Unreasonable D/E ratio
+                    print(f"Unreasonable Debt-to-Equity ratio: {de_value}, setting to N/A")
+                    ratios['Debt-to-Equity'] = 'N/A'
             
-            try:
-                # Free Cash Flow Margin
-                fcf = latest_is.get('Free Cash Flow', 0)
-                if total_revenue != 0:
-                    ratios['FCF Margin'] = f"{(fcf/total_revenue)*100:.2f}%"
-            except:
-                pass
-        
-        # Healthcare sector ratios
-        elif 'healthcare' in sector:
-            try:
-                # Gross Margin
-                gross_profit = latest_is.get('Gross Profit', 0)
-                if total_revenue != 0:
-                    ratios['Gross Margin'] = f"{(gross_profit/total_revenue)*100:.2f}%"
-            except:
-                pass
-        
-        # Energy sector ratios
-        elif 'energy' in sector:
-            try:
-                # EBITDA Margin
-                ebitda = latest_is.get('EBITDA', 0)
-                if total_revenue != 0:
-                    ratios['EBITDA Margin'] = f"{(ebitda/total_revenue)*100:.2f}%"
-            except:
-                pass
-        
-        # Financial sector ratios (including banks)
-        elif 'financial' in sector:
-            try:
-                # Net Interest Margin
-                net_interest_income = latest_is.get('Net Interest Income', 0)
-                average_earning_assets = latest_bs.get('Total Assets', 0)
-                if average_earning_assets != 0:
-                    ratios['Net Interest Margin'] = f"{(net_interest_income/average_earning_assets)*100:.2f}%"
-            except:
-                pass
+            # Current Ratio validation
+            if 'Current Ratio' in ratios and ratios['Current Ratio'] != 'N/A':
+                cr_value = float(ratios['Current Ratio'].replace('%', ''))
+                if cr_value < 0 or cr_value > 100:  # Unreasonable Current Ratio
+                    print(f"Unreasonable Current Ratio: {cr_value}, setting to N/A")
+                    ratios['Current Ratio'] = 'N/A'
             
-            try:
-                # Capital Adequacy Ratio
-                total_capital = latest_bs.get('Total Stockholder Equity', 0)
-                risk_weighted_assets = latest_bs.get('Total Assets', 0)
-                if risk_weighted_assets != 0:
-                    ratios['Capital Adequacy Ratio'] = f"{(total_capital/risk_weighted_assets)*100:.2f}%"
-            except:
-                pass
+            # ROE validation
+            if 'ROE' in ratios and ratios['ROE'] != 'N/A':
+                roe_value = float(ratios['ROE'].replace('%', ''))
+                if roe_value < -100 or roe_value > 100:  # Unreasonable ROE
+                    print(f"Unreasonable ROE: {roe_value}, setting to N/A")
+                    ratios['ROE'] = 'N/A'
+            
+            # ROA validation
+            if 'ROA' in ratios and ratios['ROA'] != 'N/A':
+                roa_value = float(ratios['ROA'].replace('%', ''))
+                if roa_value < -50 or roa_value > 50:  # Unreasonable ROA
+                    print(f"Unreasonable ROA: {roa_value}, setting to N/A")
+                    ratios['ROA'] = 'N/A'
+            
+            # Operating Margin validation
+            if 'Operating Margin' in ratios and ratios['Operating Margin'] != 'N/A':
+                om_value = float(ratios['Operating Margin'].replace('%', ''))
+                if om_value < -100 or om_value > 100:  # Unreasonable Operating Margin
+                    print(f"Unreasonable Operating Margin: {om_value}, setting to N/A")
+                    ratios['Operating Margin'] = 'N/A'
+            
+            # ROCE validation
+            if 'ROCE' in ratios and ratios['ROCE'] != 'N/A':
+                roce_value = float(ratios['ROCE'].replace('%', ''))
+                if roce_value < -100 or roce_value > 100:  # Unreasonable ROCE
+                    print(f"Unreasonable ROCE: {roce_value}, setting to N/A")
+                    ratios['ROCE'] = 'N/A'
+            
+            # Dividend Yield validation
+            if 'Dividend Yield' in ratios and ratios['Dividend Yield'] != 'N/A':
+                dy_value = float(ratios['Dividend Yield'].replace('%', ''))
+                if dy_value < 0 or dy_value > 15:  # Unreasonable Dividend Yield (over 15%)
+                    print(f"Unreasonable Dividend Yield: {dy_value}, setting to N/A")
+                    ratios['Dividend Yield'] = 'N/A'
+            
+            # Net Profit Margin validation
+            if 'Net Profit Margin' in ratios and ratios['Net Profit Margin'] != 'N/A':
+                npm_value = float(ratios['Net Profit Margin'].replace('%', ''))
+                if npm_value < -100 or npm_value > 100:  # Unreasonable Net Profit Margin
+                    print(f"Unreasonable Net Profit Margin: {npm_value}, setting to N/A")
+                    ratios['Net Profit Margin'] = 'N/A'
+        except Exception as e:
+            print(f"Error validating ratios: {str(e)}")
         
-        # Retail sector ratios
-        elif 'retail' in sector:
-            try:
-                # Inventory Turnover
-                inventory = latest_bs.get('Inventory', 0)
-                cogs = latest_is.get('Cost Of Revenue', 0)
-                if inventory != 0:
-                    ratios['Inventory Turnover'] = f"{cogs/inventory:.2f}"
-            except:
-                pass
+        # Store in session state for future use
+        if hasattr(st, 'session_state'):
+            st.session_state.financial_ratios = ratios
+            print(f"Stored financial ratios in session state: {ratios}")
         
-        # Add common ratios for all sectors
-        try:
-            # Asset Turnover
-            if total_assets != 0:
-                ratios['Asset Turnover'] = f"{total_revenue/total_assets:.2f}"
-        except:
-            pass
-        
-        try:
-            # Quick Ratio
-            quick_assets = current_assets - latest_bs.get('Inventory', 0)
-            if current_liabilities != 0:
-                ratios['Quick Ratio'] = f"{quick_assets/current_liabilities:.2f}"
-        except:
-            pass
-        
+        print(f"Final calculated ratios: {ratios}")
         return str(ratios)
     except Exception as e:
-        return f"Error calculating financial ratios: {str(e)}"
+        print(f"Error calculating financial ratios: {str(e)}")
+        # Return a dictionary with N/A values for all ratios
+        default_ratios = {
+            'Debt-to-Equity': 'N/A',
+            'Current Ratio': 'N/A',
+            'ROE': 'N/A',
+            'ROA': 'N/A',
+            'Operating Margin': 'N/A',
+            'ROCE': 'N/A',
+            'Dividend Yield': 'N/A',
+            'Net Profit Margin': 'N/A',
+            'P/E Ratio': 'N/A',
+            'Price/Book': 'N/A'
+        }
+        return str(default_ratios)
 
 def analyze_sector_and_peers(symbol: str) -> str:
     """Analyzes sector performance and compares with peer companies"""
@@ -559,6 +797,8 @@ def analyze_sector_and_peers(symbol: str) -> str:
                 elif 'financial' in sector.lower():
                     metrics['ROE'] = f"{peer_info.get('returnOnEquity', 'N/A')*100:.2f}%" if peer_info.get('returnOnEquity') else 'N/A'
                     metrics['ROA'] = f"{peer_info.get('returnOnAssets', 'N/A')*100:.2f}%" if peer_info.get('returnOnAssets') else 'N/A'
+                    metrics['Net Interest Margin'] = f"{peer_info.get('netInterestMargin', 'N/A')*100:.2f}%" if peer_info.get('netInterestMargin') else 'N/A'
+                    metrics['Capital Adequacy Ratio'] = f"{peer_info.get('capitalAdequacyRatio', 'N/A')*100:.2f}%" if peer_info.get('capitalAdequacyRatio') else 'N/A'
                 elif 'energy' in sector.lower():
                     metrics['EBITDA Margin'] = f"{peer_info.get('ebitdaMargins', 'N/A')*100:.2f}%" if peer_info.get('ebitdaMargins') else 'N/A'
                     metrics['Operating Margin'] = f"{peer_info.get('operatingMargins', 'N/A')*100:.2f}%" if peer_info.get('operatingMargins') else 'N/A'
@@ -584,10 +824,9 @@ def analyze_dividend_and_growth(symbol: str) -> str:
     try:
         stock = yf.Ticker(symbol)
         info = stock.info
-        earnings = stock.earnings
         
-        if earnings.empty:
-            return "Unable to analyze dividend and growth: Missing earnings data"
+        # Get historical data for growth calculations
+        hist_data = stock.history(period="5y")
         
         # Determine currency based on exchange
         currency = "₹" if ".NS" in symbol else "$"
@@ -595,93 +834,109 @@ def analyze_dividend_and_growth(symbol: str) -> str:
         # Get sector for sector-specific analysis
         sector = info.get('sector', '').lower()
         
-        # Dividend Analysis
-        dividend_metrics = {
-            'Dividend Yield': f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else 'N/A',
-            'Dividend Rate': f"{currency}{info.get('dividendRate', 0):,.2f}" if info.get('dividendRate') else 'N/A',
-            'Payout Ratio': f"{info.get('payoutRatio', 0)*100:.2f}%" if info.get('payoutRatio') else 'N/A',
-            '5-Year Average Dividend Yield': f"{info.get('fiveYearAvgDividendYield', 0)*100:.2f}%" if info.get('fiveYearAvgDividendYield') else 'N/A'
-        }
+        # Dividend Analysis with multiple attempts for each metric
+        dividend_metrics = {}
+        
+        # Dividend Yield
+        dividend_yield = (
+            info.get('dividendYield',
+            info.get('yield',
+            info.get('trailingAnnualDividendYield', None))))
+        dividend_metrics['Dividend Yield'] = f"{dividend_yield*100:.2f}%" if dividend_yield else 'N/A'
+        
+        # Dividend Rate
+        dividend_rate = (
+            info.get('dividendRate',
+            info.get('trailingAnnualDividendRate',
+            info.get('lastDividendValue', None))))
+        dividend_metrics['Dividend Rate'] = f"{currency}{dividend_rate:,.2f}" if dividend_rate else 'N/A'
+        
+        # Payout Ratio
+        payout_ratio = (
+            info.get('payoutRatio',
+            info.get('dividendPayout',
+            info.get('dividendPayoutRatio', None))))
+        dividend_metrics['Payout Ratio'] = f"{payout_ratio*100:.2f}%" if payout_ratio else 'N/A'
+        
+        # 5-Year Average Dividend Yield
+        five_year_avg_yield = (
+            info.get('fiveYearAvgDividendYield',
+            info.get('5yearAverageDividendYield',
+            info.get('averageDividendYield', None))))
+        dividend_metrics['5-Year Average Dividend Yield'] = f"{five_year_avg_yield:.2f}%" if five_year_avg_yield else 'N/A'
         
         # Earnings Growth Analysis
         earnings_growth = {}
         try:
-            # Calculate year-over-year growth rates
-            earnings['YoY Growth'] = earnings['Earnings'].pct_change(periods=4) * 100
-            earnings['Revenue Growth'] = earnings['Revenue'].pct_change(periods=4) * 100
-            
-            # Get latest growth rates
-            earnings_growth['Latest Earnings Growth'] = f"{earnings['YoY Growth'].iloc[-1]:.2f}%"
-            earnings_growth['Latest Revenue Growth'] = f"{earnings['Revenue Growth'].iloc[-1]:.2f}%"
-            
-            # Calculate 5-year CAGR
-            if len(earnings) >= 20:  # 5 years of quarterly data
-                earnings_cagr = ((earnings['Earnings'].iloc[-1] / earnings['Earnings'].iloc[-20]) ** (1/5) - 1) * 100
-                revenue_cagr = ((earnings['Revenue'].iloc[-1] / earnings['Revenue'].iloc[-20]) ** (1/5) - 1) * 100
-                earnings_growth['5-Year Earnings CAGR'] = f"{earnings_cagr:.2f}%"
-                earnings_growth['5-Year Revenue CAGR'] = f"{revenue_cagr:.2f}%"
-        except:
+            # Get quarterly financials
+            financials = stock.quarterly_financials
+            if not financials.empty:
+                # Calculate year-over-year growth rates
+                if 'Net Income' in financials.index:
+                    earnings = financials.loc['Net Income']
+                    if len(earnings) >= 4:
+                        yoy_growth = ((earnings.iloc[0] / earnings.iloc[4]) - 1) * 100
+                    else:
+                        earnings_growth['Latest Earnings Growth'] = 'N/A (insufficient data)'
+                
+                # Revenue Growth
+                if 'Total Revenue' in financials.index:
+                    revenue = financials.loc['Total Revenue']
+                    if len(revenue) >= 4:
+                        rev_growth = ((revenue.iloc[0] / revenue.iloc[4]) - 1) * 100
+                    else:
+                        earnings_growth['Latest Revenue Growth'] = 'N/A (insufficient data)'
+                
+                # Calculate 5-year CAGR if enough data
+                if len(hist_data) >= 1250:  # Approximately 5 years of trading days
+                    # Price CAGR
+                    start_price = hist_data['Close'].iloc[0]
+                    end_price = hist_data['Close'].iloc[-1]
+                    price_cagr = ((end_price / start_price) ** (1/5) - 1) * 100
+                    earnings_growth['5-Year Price CAGR'] = f"{price_cagr:.2f}%"
+                    
+                    if len(financials.index) >= 20:  # 5 years of quarterly data
+                        if 'Net Income' in financials.index:
+                            start_earnings = financials.loc['Net Income'].iloc[-1]
+                            end_earnings = financials.loc['Net Income'].iloc[0]
+                            if start_earnings > 0 and end_earnings > 0:
+                                earnings_cagr = ((end_earnings / start_earnings) ** (1/5) - 1) * 100
+                                earnings_growth['5-Year Earnings CAGR'] = f"{earnings_cagr:.2f}%"
+        except Exception as e:
+            print(f"Error calculating growth metrics: {str(e)}")
             earnings_growth['Latest Earnings Growth'] = 'N/A'
             earnings_growth['Latest Revenue Growth'] = 'N/A'
+            earnings_growth['5-Year Price CAGR'] = 'N/A'
             earnings_growth['5-Year Earnings CAGR'] = 'N/A'
-            earnings_growth['5-Year Revenue CAGR'] = 'N/A'
         
-        # Sector-specific metrics
-        sector_metrics = {}
+        # Add additional growth metrics
         try:
-            if 'technology' in sector:
-                # Technology sector metrics
-                sector_metrics['R&D to Revenue'] = f"{info.get('researchAndDevelopmentToRevenue', 0)*100:.2f}%" if info.get('researchAndDevelopmentToRevenue') else 'N/A'
-                sector_metrics['Free Cash Flow Margin'] = f"{info.get('freeCashflowToRevenue', 0)*100:.2f}%" if info.get('freeCashflowToRevenue') else 'N/A'
-                sector_metrics['Operating Cash Flow'] = f"{currency}{info.get('operatingCashflow', 0):,.2f}" if info.get('operatingCashflow') else 'N/A'
+            # Revenue Growth from info
+            rev_growth = info.get('revenueGrowth', None)
+            if rev_growth is not None:
+                earnings_growth['Revenue Growth (TTM)'] = f"{rev_growth*100:.2f}%"
             
-            elif 'healthcare' in sector:
-                # Healthcare sector metrics
-                sector_metrics['Gross Margin'] = f"{info.get('grossMargins', 0)*100:.2f}%" if info.get('grossMargins') else 'N/A'
-                sector_metrics['Operating Margin'] = f"{info.get('operatingMargins', 0)*100:.2f}%" if info.get('operatingMargins') else 'N/A'
-                sector_metrics['EBITDA Margin'] = f"{info.get('ebitdaMargins', 0)*100:.2f}%" if info.get('ebitdaMargins') else 'N/A'
+            # Earnings Growth from info
+            earn_growth = info.get('earningsGrowth', None)
+            if earn_growth is not None:
+                earnings_growth['Earnings Growth (TTM)'] = f"{earn_growth*100:.2f}%"
             
-            elif 'energy' in sector:
-                # Energy sector metrics
-                sector_metrics['EBITDA Margin'] = f"{info.get('ebitdaMargins', 0)*100:.2f}%" if info.get('ebitdaMargins') else 'N/A'
-                sector_metrics['Operating Margin'] = f"{info.get('operatingMargins', 0)*100:.2f}%" if info.get('operatingMargins') else 'N/A'
-                sector_metrics['Profit Margin'] = f"{info.get('profitMargins', 0)*100:.2f}%" if info.get('profitMargins') else 'N/A'
-            
-            elif 'financial' in sector:
-                # Financial sector metrics
-                sector_metrics['Net Interest Margin'] = f"{info.get('netInterestMargin', 0)*100:.2f}%" if info.get('netInterestMargin') else 'N/A'
-                sector_metrics['Capital Adequacy Ratio'] = f"{info.get('capitalAdequacyRatio', 0)*100:.2f}%" if info.get('capitalAdequacyRatio') else 'N/A'
-                sector_metrics['Cost to Income Ratio'] = f"{info.get('costToIncomeRatio', 0)*100:.2f}%" if info.get('costToIncomeRatio') else 'N/A'
-            
-            elif 'retail' in sector:
-                # Retail sector metrics
-                sector_metrics['Gross Margin'] = f"{info.get('grossMargins', 0)*100:.2f}%" if info.get('grossMargins') else 'N/A'
-                sector_metrics['Operating Margin'] = f"{info.get('operatingMargins', 0)*100:.2f}%" if info.get('operatingMargins') else 'N/A'
-                sector_metrics['Inventory Turnover'] = f"{info.get('inventoryTurnover', 0):.2f}" if info.get('inventoryTurnover') else 'N/A'
-            
-            elif 'industrial' in sector:
-                # Industrial sector metrics
-                sector_metrics['Operating Margin'] = f"{info.get('operatingMargins', 0)*100:.2f}%" if info.get('operatingMargins') else 'N/A'
-                sector_metrics['EBITDA Margin'] = f"{info.get('ebitdaMargins', 0)*100:.2f}%" if info.get('ebitdaMargins') else 'N/A'
-                sector_metrics['Asset Turnover'] = f"{info.get('assetTurnover', 0):.2f}" if info.get('assetTurnover') else 'N/A'
-            
-            elif 'consumer' in sector:
-                # Consumer sector metrics
-                sector_metrics['Gross Margin'] = f"{info.get('grossMargins', 0)*100:.2f}%" if info.get('grossMargins') else 'N/A'
-                sector_metrics['Operating Margin'] = f"{info.get('operatingMargins', 0)*100:.2f}%" if info.get('operatingMargins') else 'N/A'
-                sector_metrics['Inventory Turnover'] = f"{info.get('inventoryTurnover', 0):.2f}" if info.get('inventoryTurnover') else 'N/A'
-        except:
-            pass
+            # EPS Growth
+            eps_growth = info.get('earningsQuarterlyGrowth', None)
+            if eps_growth is not None:
+                earnings_growth['EPS Growth (QoQ)'] = f"{eps_growth*100:.2f}%"
+        except Exception as e:
+            print(f"Error calculating additional growth metrics: {str(e)}")
         
         analysis = {
             'Dividend Metrics': dividend_metrics,
-            'Growth Metrics': earnings_growth,
-            'Sector-Specific Metrics': sector_metrics
+            'Growth Metrics': earnings_growth
         }
         
         return str(analysis)
     except Exception as e:
-        return f"Error analyzing dividend and growth: {str(e)}"
+        print(f"Error in analyze_dividend_and_growth: {str(e)}")
+        return "Error analyzing dividend and growth metrics"
 
 class StockAnalyzer:
     def __init__(self):
@@ -734,7 +989,12 @@ class StockAnalyzer:
             5. Risk assessment and management
             6. Market positioning and competitive analysis
             7. Dividend and capital allocation analysis
-            8. Economic impact assessment""",
+            8. Economic impact assessment
+            
+            You provide detailed financial analysis with specific numbers and metrics.
+            When analyzing a stock, you always include key financial ratios such as Debt-to-Equity,
+            Current Ratio, ROE, ROA, and Operating Margin in your analysis, with clear explanations
+            of what these metrics indicate about the company's financial health.""",
             tools=[self.stock_data_tool, self.financial_ratios_tool, self.sector_analysis_tool, self.dividend_growth_tool],
             llm=llm,
             verbose=True
@@ -762,7 +1022,13 @@ class StockAnalyzer:
             5. Trend analysis and momentum
             6. Market structure and cycles
             7. Volatility analysis
-            8. Trading signals and entry/exit points""",
+            8. Trading signals and entry/exit points
+            
+            You provide detailed technical analysis with specific numbers and metrics.
+            When analyzing a stock, you always include key technical indicators such as
+            moving averages (SMA 20, SMA 50), RSI, Bollinger Bands, MACD, and Stochastic
+            Oscillator in your analysis, with clear explanations of what these indicators
+            suggest about potential price movements.""",
             tools=[self.technical_analysis_tool],
             llm=llm,
             verbose=True
@@ -779,7 +1045,11 @@ class StockAnalyzer:
             5. Value at Risk (VaR) calculation
             6. Stress testing
             7. Risk-adjusted returns
-            8. Position sizing recommendations""",
+            8. Position sizing recommendations
+            
+            You provide detailed risk analysis with specific numbers and metrics.
+            When analyzing a stock, you always include Value at Risk (VaR), stress testing scenarios,
+            and risk-adjusted returns in your analysis.""",
             tools=[self.technical_analysis_tool, self.financial_ratios_tool],
             llm=llm,
             verbose=True
@@ -846,14 +1116,18 @@ class StockAnalyzer:
                     11. Dividend analysis and yield metrics
                     12. Earnings growth rate analysis
 
-                    IMPORTANT: You MUST use all available tools to provide comprehensive analysis:
-                    1. Use stock_data_tool for basic company information and metrics
-                    2. Use financial_ratios_tool to analyze key financial ratios
-                    3. Use sector_analysis_tool to compare with peers and sector performance
-                    4. Use dividend_growth_tool to analyze dividend metrics and growth rates
-
+                    IMPORTANT: You MUST use all available tools to provide comprehensive analysis.
+                    
+                    CRITICAL: Always include the following in your analysis:
+                    - Debt-to-Equity Ratio: Explain what this indicates about financial leverage
+                    - Current Ratio: Explain what this indicates about short-term liquidity
+                    - ROE (Return on Equity): Explain what this indicates about profitability
+                    - ROA (Return on Assets): Explain what this indicates about asset efficiency
+                    - Operating Margin: Explain what this indicates about operational efficiency
+                    
                     For each section, provide specific numbers and data points from the tools.
-                    If any data is unavailable, explicitly state that it could not be retrieved.""",
+                    If any data is unavailable, explicitly state that it could not be retrieved and explain
+                    what this might indicate about the company.""",
                     agent=self.financial_analyst,
                     expected_output="""A comprehensive fundamental analysis including:
                     - Financial health assessment with specific metrics
@@ -921,6 +1195,13 @@ class StockAnalyzer:
                     3. Analyze Bollinger Bands
                     4. Provide specific price levels and indicators
                     
+                    CRITICAL: Always include the following in your analysis:
+                    - Current price in relation to SMA 20 and SMA 50 (above/below)
+                    - RSI value and whether it indicates overbought (>70) or oversold (<30) conditions
+                    - Bollinger Bands position (upper, middle, lower) and what it suggests
+                    - Key support and resistance levels with specific price points
+                    - Clear trading signals (buy, sell, hold) based on technical indicators
+                    
                     For each section, provide specific numbers and levels from the technical indicators.
                     If any data is unavailable, explicitly state that it could not be retrieved.""",
                     agent=self.technical_analyst,
@@ -932,8 +1213,7 @@ class StockAnalyzer:
                     - Market structure analysis with key levels
                     - Volatility assessment with specific metrics
                     - Trading signals with entry/exit prices
-                    - Entry/exit recommendations with price targets""",
-                    context={"period": "6mo"}
+                    - Entry/exit recommendations with price targets"""
                 )
                 tasks.append(technical_analysis)
                 agents.append(self.technical_analyst)
@@ -953,6 +1233,12 @@ class StockAnalyzer:
                     IMPORTANT: You MUST use:
                     1. technical_analysis_tool for volatility metrics and market risk
                     2. financial_ratios_tool for financial risk assessment
+                    
+                    CRITICAL: Always include the following in your analysis:
+                    - Value at Risk (VaR) at 95% and 99% confidence levels
+                    - Conditional VaR (Expected Shortfall)
+                    - Stress test scenarios (market crash, interest rate hike, sector shock)
+                    - Risk-adjusted returns (Sharpe, Sortino, Treynor, Information, and Calmar ratios)
                     
                     For each section, provide specific numbers and metrics from the tools.
                     If any data is unavailable, explicitly state that it could not be retrieved.""",
