@@ -234,10 +234,13 @@ def analyze_advanced_technical_indicators(symbol: str, period: str = '1y') -> st
 def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
     """Calculates various risk metrics including VaR, Sharpe ratio, and Beta"""
     try:
-        # Check if we already have calculated risk metrics in session state
-        if hasattr(st.session_state, 'risk_metrics') and st.session_state.risk_metrics is not None:
-            print(f"Using cached risk metrics from session state")
-            return str(st.session_state.risk_metrics)
+        # Create a unique key for this stock's risk metrics
+        risk_metrics_key = f"risk_metrics_{symbol}_{period}"
+        
+        # Check if we already have calculated risk metrics in session state for this specific stock
+        if hasattr(st.session_state, risk_metrics_key) and st.session_state[risk_metrics_key] is not None:
+            print(f"Using cached risk metrics for {symbol} from session state")
+            return str(st.session_state[risk_metrics_key])
             
         stock = yf.Ticker(symbol)
         hist = stock.history(period=period)
@@ -288,7 +291,7 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
             else:
                 beta = 0
         except Exception as e:
-            print(f"Error calculating beta: {str(e)}")
+            print(f"Error calculating beta for {symbol}: {str(e)}")
             beta = 0
         
         # Calculate Maximum Drawdown
@@ -298,7 +301,7 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
             drawdowns = cumulative_returns / rolling_max - 1
             max_drawdown = drawdowns.min()
         except Exception as e:
-            print(f"Error calculating max drawdown: {str(e)}")
+            print(f"Error calculating max drawdown for {symbol}: {str(e)}")
             max_drawdown = 0
             
         # Stress Testing Scenarios
@@ -318,7 +321,7 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
             # Calculate Conditional VaR (Expected Shortfall)
             cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95 * 1.5
         except Exception as e:
-            print(f"Error in stress testing: {str(e)}")
+            print(f"Error in stress testing for {symbol}: {str(e)}")
             market_crash_impact = -0.15  # Default value
             interest_rate_impact = -0.05  # Default value
             sector_shock = -0.10  # Default value
@@ -345,7 +348,7 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
             if max_drawdown != 0:
                 calmar_ratio = (returns.mean() * 252) / abs(max_drawdown)
         except Exception as e:
-            print(f"Error calculating risk-adjusted returns: {str(e)}")
+            print(f"Error calculating risk-adjusted returns for {symbol}: {str(e)}")
             treynor_ratio = 0
             information_ratio = 0
             calmar_ratio = 0
@@ -366,14 +369,14 @@ def calculate_risk_metrics(symbol: str, period: str = '1y') -> str:
             "Calmar Ratio": f"{calmar_ratio:.2f}"
         }
         
-        # Store in session state for future use
+        # Store in session state with unique key for this stock
         if hasattr(st, 'session_state'):
-            st.session_state.risk_metrics = analysis
-            print(f"Stored risk metrics in session state: {analysis}")
+            st.session_state[risk_metrics_key] = analysis
+            print(f"Stored risk metrics for {symbol} in session state: {analysis}")
         
         return str(analysis)
     except Exception as e:
-        print(f"Error calculating risk metrics: {str(e)}")
+        print(f"Error calculating risk metrics for {symbol}: {str(e)}")
         return f"Error calculating risk metrics: {str(e)}"
 
 def calculate_financial_ratios(symbol: str) -> str:
